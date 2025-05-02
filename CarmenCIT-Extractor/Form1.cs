@@ -340,12 +340,8 @@ namespace CarmenCIT_Extractor
 
         private void listBox1_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (listBox1.SelectedIndex < 0) return;
+           
 
-            globalarray = readall(listBox1.GetItemText(listBox1.SelectedItem));
-            txtDesc.Text = "";
-            label2.Text = "Loaded.";
-            readCIT();
         }
 
         private int getInt16(int index)
@@ -710,6 +706,8 @@ namespace CarmenCIT_Extractor
 
         private void pictureBox1_MouseMove(object sender, MouseEventArgs e)
         {
+            if (pictureBox1.Image == null) return;
+
             int adr=getadr(e.X, e.Y,pixelsize);
             try
             {
@@ -902,83 +900,256 @@ namespace CarmenCIT_Extractor
 
         private void retrieveTable(byte[] filearray, ListBox listBox2)
         {
-            // ID → Açıklama sözlüğü
+            // Dictionary: ID → Description
             var idDescriptions = new Dictionary<ushort, string>
-            {
-                { 1,   "Şehir Adı " },
-                { 2,   "İmaj Datası " },
-                { 3,   "Açıklama Listesi " },
-                { 4,   "Eşya Listesi " },
-                { 100, "Bilinmeyen 100" },
-                { 101, "Bilinmeyen 101" },
-                // … diğerleri …
-                { 112, "Bilinmeyen İpucu 6" }
-            };
+    {
+        { 1,   "CITY NAME" },
+        { 2,   "CGA IMAGE" },
+        { 3,   "DESCRIPTIONS" },
+        { 4,   "ITEM LIST" },
+        // … others …
+        { 112, "UNKNOWN" }
+    };
 
             listBox2.Items.Clear();
 
-            // Temel uzunluk kontrolü
+            // Basic length check
             if (filearray == null || filearray.Length < 4)
             {
-                listBox2.Items.Add("Hata: Dosya verisi geçersiz veya çok kısa.");
+                listBox2.Items.Add("Error: File data is invalid or too short.");
                 return;
             }
 
-            // getInt16 uygulaması; istersen BitConverter.ToUInt16 da kullanabilirsin
+            // Read 16-bit values (using BitConverter.ToUInt16)
             ushort tableOffset = BitConverter.ToUInt16(filearray, 0);
             ushort tableLength = BitConverter.ToUInt16(filearray, 4);
 
-            // Offset/length geçerlilik kontrolü
+            // Offset/length validity check
             if (tableOffset == 0
                 || tableLength < 8
                 || tableOffset + tableLength > filearray.Length)
             {
-                listBox2.Items.Add($"Hata: Geçersiz tablo offset ({tableOffset}) veya uzunluk ({tableLength}).");
+                listBox2.Items.Add($"Error: Invalid table offset ({tableOffset}) or length ({tableLength}).");
                 return;
             }
 
-            listBox2.Items.Add($"Tablo Başlangıcı: 0x{tableOffset:X4}, Uzunluk: {tableLength} byte");
-            listBox2.Items.Add("--- Tablo Girdileri ---");
+            listBox2.Items.Add($"Table Start: 0x{tableOffset:X4}, Length: {tableLength} bytes");
+            listBox2.Items.Add("--- Table Entries ---");
 
             int tableEntryStart = tableOffset + 4;
             int tableEnd = tableOffset + tableLength;
-
             int currentEntryOffset = tableEntryStart;
-            // 8 byte’lık kayıtlar
-            for (; currentEntryOffset + 8 <= tableEnd; currentEntryOffset += 8)
+
+            // Entries are 8 bytes each
+            while (currentEntryOffset + 8 <= tableEnd)
             {
                 ushort id = BitConverter.ToUInt16(filearray, currentEntryOffset);
                 ushort dataOffset = BitConverter.ToUInt16(filearray, currentEntryOffset + 2);
-                //ushort unknownVal   = BitConverter.ToUInt16(filearray, currentEntryOffset + 4);
+                // ushort unknownVal = BitConverter.ToUInt16(filearray, currentEntryOffset + 4);
                 ushort dataLength = BitConverter.ToUInt16(filearray, currentEntryOffset + 6);
 
-                string desc = idDescriptions.TryGetValue(id, out var d) ? d : "Bilinmiyor";
-                var line = $"{id} ({desc}) : 0x{dataOffset:X4} [{dataLength} byte]";
+                string desc = idDescriptions.TryGetValue(id, out var d) ? d : "Unknown";
+                var line = $"{id} ({desc}) : 0x{dataOffset:X4} [{dataLength} bytes]";
 
-                // Kısa blokları string listesi say
+                // For small blocks (except image), count how many strings they contain
                 if (dataLength > 0 && dataLength < 512 && id != 2
                     && dataOffset + 2 <= filearray.Length)
                 {
                     ushort count = BitConverter.ToUInt16(filearray, dataOffset);
-                    line += $" → {count} string";
+                    line += $" → {count} string(s)";
                 }
 
                 listBox2.Items.Add(line);
+                currentEntryOffset += 8;
             }
 
-            // Eksik kalmışsa uyar
+            // Warn if there are leftover bytes at the end
             if (currentEntryOffset < tableEnd)
             {
                 int leftover = tableEnd - currentEntryOffset;
-                listBox2.Items.Add($"Uyarı: Tablo sonunda {leftover} byte tam girdi oluşturmadı.");
+                listBox2.Items.Add($"Warning: {leftover} leftover byte(s) at end of table did not form a complete entry.");
             }
 
-            listBox2.Items.Add("--- Tablo Sonu ---");
+            listBox2.Items.Add("--- End of Table ---");
+        }
+
+        private void listBox2_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (listBox2.SelectedItem == null || !(listBox2.SelectedItem is string selectedLine))
+            {
+                return;
+            }
+
+            int offsetMarkerPos = selectedLine.IndexOf(": 0x");
+            if (offsetMarkerPos < 0)
+            {
+                return;
+            }
+
+            txtDesc.Clear();
+            var output = new StringBuilder();
+
+            ushort dataOffset = 0;
+            int offsetStart = offsetMarkerPos + 4;
+            int offsetEnd = selectedLine.IndexOf(" [", offsetStart);
+            if (offsetEnd > offsetStart)
+            {
+                string offsetHex = selectedLine.Substring(offsetStart, offsetEnd - offsetStart);
+                if (!ushort.TryParse(offsetHex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out dataOffset))
+                {
+                    txtDesc.Text = $"Error: Could not parse offset from line: '{offsetHex}'";
+                    return;
+                }
+            }
+            else
+            {
+                txtDesc.Text = "Error: Invalid line format (could not find offset end).";
+                return;
+            }
+
+            ushort entryID = 0;
+            string idPart = selectedLine.Split(' ')[0];
+            ushort.TryParse(idPart, out entryID);
+
+            if (entryID == 1)
+            {
+                output.AppendLine($"--- City Name Reference (ID: 1, Offset: 0x{dataOffset:X4}) ---");
+                dataOffset += 4;
+                if (dataOffset > 0 && dataOffset < globalarray.Length)
+                {
+                    int nullPos = Array.IndexOf(globalarray, (byte)0x00, dataOffset);
+                    if (nullPos != -1)
+                    {
+                        int len = nullPos - dataOffset;
+                        if (len >= 0)
+                        {
+                            string valueString = "[EMPTY]";
+                            if (len > 0)
+                            {
+                                valueString = iso88591.GetString(globalarray, dataOffset, len);
+                            }
+                            output.AppendLine($"Value: {valueString}");
+                        }
+                        else
+                        {
+                            output.AppendLine($"ERROR: Invalid length calculated for ID 1 (Offset: {dataOffset}, NullPos: {nullPos})");
+                        }
+                    }
+                    else
+                    {
+                        output.AppendLine($"ERROR: NULL terminator not found for ID 1 starting at 0x{dataOffset:X4}.");
+                    }
+                }
+                else
+                {
+                    output.AppendLine($"ERROR: Invalid data offset (0x{dataOffset:X4}) for ID 1.");
+                }
+            }
+            else
+            {
+                bool isStringList = selectedLine.Contains("→");
+
+                if (isStringList)
+                {
+                    if (dataOffset > 0 && dataOffset + 2 <= globalarray.Length)
+                    {
+                        ushort stringCount = BitConverter.ToUInt16(globalarray, dataOffset);
+                        output.AppendLine($"--- {stringCount} Strings (Start: 0x{dataOffset:X4}) ---");
+
+                        int currentStringPos = dataOffset + 2;
+
+                        for (int i = 0; i < stringCount; i++)
+                        {
+                            if (currentStringPos >= globalarray.Length)
+                            {
+                                output.AppendLine($"ERROR: Unexpected end of file while reading string {i + 1} (Pos: {currentStringPos})");
+                                break;
+                            }
+
+                            int nullPos = Array.IndexOf(globalarray, (byte)0x00, currentStringPos);
+
+                            if (nullPos == -1)
+                            {
+                                output.AppendLine($"ERROR: NULL terminator not found for string {i + 1} (Start: {currentStringPos})");
+                                currentStringPos = globalarray.Length;
+                                break;
+                            }
+
+                            int len = nullPos - currentStringPos;
+                            string strValue;
+
+                            if (len > 0)
+                            {
+                                strValue = iso88591.GetString(globalarray, currentStringPos, len);
+                            }
+                            else
+                            {
+                                strValue = "[EMPTY]";
+                            }
+
+                            output.AppendLine($"[{i}]: {strValue}");
+                            currentStringPos = nullPos + 1;
+                        }
+                    }
+                    else
+                    {
+                        output.AppendLine($"Error: Invalid offset for string list (0x{dataOffset:X4}) or end of file reached.");
+                    }
+                }
+                else
+                {
+                    ushort dataLength = 0;
+                    int lengthStart = selectedLine.IndexOf("[") + 1;
+                    int lengthEnd = selectedLine.IndexOf(" bytes]", lengthStart);
+                    if (lengthStart > 0 && lengthEnd > lengthStart)
+                    {
+                        string lengthStr = selectedLine.Substring(lengthStart, lengthEnd - lengthStart);
+                        ushort.TryParse(lengthStr, out dataLength);
+                    }
+
+                    output.AppendLine($"--- Non-Text Data (ID: {entryID}) ---");
+                    output.AppendLine($"Start Offset: 0x{dataOffset:X4}");
+                    output.AppendLine($"Expected Length: {dataLength} bytes");
+                    output.AppendLine();
+                    output.AppendLine("(This data type cannot be displayed directly as text.)");
+                    output.AppendLine("Could be image or other binary data.");
+
+                    int bytesToPreview = dataLength;
+                    byte[] nonTextData = new byte[dataLength];
+                    if (dataOffset > 0 && dataOffset + bytesToPreview <= globalarray.Length && bytesToPreview > 0)
+                    {
+                        output.AppendLine();
+                        output.AppendLine("First Bytes (Hex):");
+                        var hexLine = new StringBuilder();
+                        for (int k = 0; k < bytesToPreview; k++)
+                        {
+                            nonTextData[k] = globalarray[dataOffset + k];
+                            hexLine.Append($"{globalarray[dataOffset + k]:X2} ");
+                            if ((k + 1) % 16 == 0)
+                            {
+                                output.AppendLine(hexLine.ToString());
+                                hexLine.Clear();
+                            }
+                        }
+                        if (hexLine.Length > 0)
+                        {
+                            output.AppendLine(hexLine.ToString());
+                        }
+                        showImage_Combined(nonTextData);
+                        // Assuming showImage exists and handles potential errors
+                        if ((entryID == 2)|| (entryID == 2001)|| (entryID > 3011 && entryID < 3016)) // Only attempt to show image for ID 2
+                        {
+                            showImage(nonTextData);
+                        }
+                    }
+                }
+            }
+
+            txtDesc.Text = output.ToString();
         }
 
 
-
-    private void listBox2_SelectedIndexChanged(object sender, EventArgs e)
+        private void listBox2_SelectedIndexChanged2(object sender, EventArgs e)
     {
         // Seçili bir öğe yoksa veya seçili öğe geçerli bir string değilse çık
         if (listBox2.SelectedItem == null || !(listBox2.SelectedItem is string selectedLine))
@@ -1083,7 +1254,7 @@ namespace CarmenCIT_Extractor
             // Verinin uzunluğunu ayrıştır (bilgi amaçlı)
             ushort dataLength = 0;
             int lengthStart = selectedLine.IndexOf("[") + 1;
-            int lengthEnd = selectedLine.IndexOf(" byte]", lengthStart);
+            int lengthEnd = selectedLine.IndexOf(" bytes]", lengthStart);
             if (lengthStart > 0 && lengthEnd > lengthStart)
             {
                 string lengthStr = selectedLine.Substring(lengthStart, lengthEnd - lengthStart);
@@ -1139,7 +1310,7 @@ namespace CarmenCIT_Extractor
 
         // 1) Başlık - Doğru değerleri kullan
         int height = BitConverter.ToUInt16(data, 0);         // A4 00 -> 164
-                                                             // int widthBytes_ignored = BitConverter.ToUInt16(data, 2); // 44 00 -> 68 (Bunu kullanmıyoruz)
+        int widthBytes = BitConverter.ToUInt16(data, 2); // 44 00 -> 68 (Bunu kullanmıyoruz)
         int scanlineBytes = BitConverter.ToUInt16(data, 4); // 22 00 -> 34 (Doğru satır byte sayısı)
         int pixelWidth = scanlineBytes * 4;                   // 34 * 4 = 136 (Doğru piksel genişliği)
 
@@ -1181,7 +1352,7 @@ namespace CarmenCIT_Extractor
                     // Eğer count > bytesToCopy ise veri erken bitti demektir, döngüden çıkabiliriz.
                     if (bytesToCopy < count) break;
                 }
-                else if (code >= 129) // Tekrar (129-255)
+                else if (code >= 128) // Tekrar (129-255)
                 {
                     // Veri sonu kontrolü
                     if (src >= data.Length) break;
@@ -1282,5 +1453,242 @@ namespace CarmenCIT_Extractor
     }
 
 
-}
+
+
+
+public void showImage_Combined(byte[] data)
+    {
+        if (data == null || data.Length < 6) // Minimum başlık boyutu
+        {
+            if (pictureBox1.Image != null) { pictureBox1.Image.Dispose(); pictureBox1.Image = null; }
+            return;
+        }
+
+        // 1) Başlık Oku
+        int height = BitConverter.ToUInt16(data, 0);
+        // int widthBytes_ignored = BitConverter.ToUInt16(data, 2); // Eski genişlik, kullanılmıyor
+        int scanlineBytes = BitConverter.ToUInt16(data, 4); // Kullanılacak satır başına byte
+        int pixelWidth = scanlineBytes * 4; // Gerçek piksel genişliği
+
+        if (height <= 0 || scanlineBytes <= 0 || pixelWidth <= 0)
+        {
+            MessageBox.Show("Geçersiz başlık bilgisi (yükseklik veya genişlik <= 0).");
+            if (pictureBox1.Image != null) { pictureBox1.Image.Dispose(); pictureBox1.Image = null; }
+            return;
+        }
+
+        int expectedDecompressedSize = height * scanlineBytes;
+        List<byte> decompressedData = new List<byte>(expectedDecompressedSize); // Veriyi tutacak liste
+
+        // 2) Sıkıştırılmış mı, Sıkıştırılmamış mı Kontrol Et
+        bool isCompressed = true; // Varsayılan olarak sıkıştırılmış kabul et
+        if ((expectedDecompressedSize + 6) == data.Length)
+        {
+            // Eğer dosya boyutu = (beklenen ham veri boyutu + 6 byte başlık) ise, sıkıştırılmamış
+            isCompressed = false;
+        }
+        // Güvenlik kontrolü: Eğer beklenen boyut + başlık > dosya boyutu ise, veri eksik veya hatalı
+        else if ((expectedDecompressedSize + 6) > data.Length && data.Length > 6)
+        {
+            // Bu durum sıkıştırılmış olabilir, ama yine de bir uyarı verilebilir.
+            // Şimdilik sıkıştırılmış olarak devam etmesine izin veriyoruz, dekompresyon sonunda boyut kontrolü yapılacak.
+            // MessageBox.Show("Uyarı: Dosya boyutu, başlık bilgisine göre beklenenden küçük görünüyor.");
+        }
+        else if (data.Length <= 6) // Sadece başlık varsa
+        {
+            MessageBox.Show("Dosya sadece başlık içeriyor, görüntü verisi yok.");
+            if (pictureBox1.Image != null) { pictureBox1.Image.Dispose(); pictureBox1.Image = null; }
+            return;
+        }
+
+
+        int dataStartOffset = 6; // Veri her zaman 6. byte'tan sonra başlar
+
+        // 3) Veriyi İşle
+        if (!isCompressed)
+        {
+            // Sıkıştırılmamış: Veriyi doğrudan kopyala
+            try
+            {
+                for (int i = 0; i < expectedDecompressedSize; i++)
+                {
+                    // Başlıktan sonraki veriyi kopyala
+                    decompressedData.Add(data[dataStartOffset + i]);
+                }
+            }
+            catch (IndexOutOfRangeException)
+            {
+                MessageBox.Show("Sıkıştırılmamış veri okunurken hata: Dosya beklenenden kısa.");
+                if (pictureBox1.Image != null) { pictureBox1.Image.Dispose(); pictureBox1.Image = null; }
+                return;
+            }
+        }
+        else
+        {
+            // Sıkıştırılmış: PackBits varyantını kullanarak çöz
+            int src = dataStartOffset;
+            try
+            {
+                // Döngü koşulu: Kaynak verinin sonuna veya hedefin beklenen boyutuna ulaşana kadar
+                while (src < data.Length && decompressedData.Count < expectedDecompressedSize)
+                {
+                    byte code = data[src++];
+
+                    if (code <= 127) // Literal (0-127)
+                    {
+                        int count = code + 1;
+                        int bytesToCopy = Math.Min(count, data.Length - src);
+                        if (bytesToCopy <= 0) break;
+
+                        for (int i = 0; i < bytesToCopy && decompressedData.Count < expectedDecompressedSize; i++)
+                        {
+                            decompressedData.Add(data[src + i]);
+                        }
+                        src += bytesToCopy;
+                        if (bytesToCopy < count) break; // Veri erken bitti
+                    }
+                    else // Tekrar (128-255) - code=128 NOP olur
+                    {
+                        //if (code == 128) continue; // NOP kodunu açıkça atla
+
+                        // Tekrar edilecek byte'ı okumadan önce src kontrolü
+                        if (src >= data.Length) break;
+
+                        int count = 256 - code; // Tekrar sayısı (1 ile 128 arası)
+                        byte val = data[src++];
+
+                        for (int i = 0; i < count && decompressedData.Count < expectedDecompressedSize; i++)
+                        {
+                            decompressedData.Add(val);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Dekompresyon sırasında hata: {ex.Message}");
+                if (pictureBox1.Image != null) { pictureBox1.Image.Dispose(); pictureBox1.Image = null; }
+                return;
+            }
+        }
+
+        // 4) Boyut Kontrolü (Dekompresyon sonrası)
+        if (decompressedData.Count != expectedDecompressedSize)
+        {
+            MessageBox.Show($"Uyarı: Beklenen veri boyutu ({expectedDecompressedSize}) ile elde edilen boyut ({decompressedData.Count}) farklı. Görüntü eksik/hatalı olabilir.");
+            if (decompressedData.Count == 0) // Hiç veri yoksa
+            {
+                if (pictureBox1.Image != null) { pictureBox1.Image.Dispose(); pictureBox1.Image = null; }
+                return;
+            }
+        }
+
+        // 5) Bitmap'e Render Et (LockBits ile)
+        Color[] palette = new Color[] { Color.Black, Color.Cyan, Color.Magenta, Color.White };
+        // Bitmap boyutunu gerçek piksel genişliğine göre ayarla
+        Bitmap bmp = new Bitmap(pixelWidth, height, PixelFormat.Format32bppArgb);
+        BitmapData bmpData = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.WriteOnly, bmp.PixelFormat);
+
+        IntPtr ptr = bmpData.Scan0;
+        int stride = bmpData.Stride;
+        byte[] pixelBuffer = new byte[stride * height];
+        int currentRawIndex = 0;
+        // İşlenecek maksimum byte sayısını, çözülen veri ve beklenen boyutun minimumu olarak al
+        int maxBytesToProcess = Math.Min(decompressedData.Count, expectedDecompressedSize);
+
+        try
+        {
+            for (int y = 0; y < height; y++)
+            {
+                int currentLineOffset = y * stride;
+                for (int xb = 0; xb < scanlineBytes; xb++) // Satır başına doğru byte sayısı (örn: 34)
+                {
+                    if (currentRawIndex >= maxBytesToProcess) break; // Çözülmüş veya kopyalanmış veri bitti
+
+                    byte b = decompressedData[currentRawIndex++];
+
+                    // Dört 2-bitlik pikseli ayıkla ve tampona yaz (BGRA)
+                    for (int i = 0; i < 4; i++)
+                    {
+                        int pixelX = xb * 4 + i;
+                        if (pixelX >= pixelWidth) continue; // Bitmap genişliğini aşma
+
+                        int shift = (3 - i) * 2;
+                        int idx = (b >> shift) & 0x03;
+                        Color c = palette[idx];
+
+                        int offset = currentLineOffset + pixelX * 4;
+
+                        if (offset + 3 < pixelBuffer.Length)
+                        {
+                            pixelBuffer[offset] = c.B;
+                            pixelBuffer[offset + 1] = c.G;
+                            pixelBuffer[offset + 2] = c.R;
+                            pixelBuffer[offset + 3] = 255; // Alpha
+                        }
+                    }
+                }
+                if (currentRawIndex >= maxBytesToProcess) break;
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Bitmap'e yazarken hata: {ex.Message}");
+            // Hata olsa bile UnlockBits yapılmalı
+        }
+        finally
+        {
+            // Tamponu bitmap'e kopyala ve kilidi aç
+            Marshal.Copy(pixelBuffer, 0, ptr, Math.Min(pixelBuffer.Length, stride * height)); // Kopyalanacak boyutu da sınırla
+            bmp.UnlockBits(bmpData);
+        }
+
+
+        // 6) PictureBox’a Ata
+        if (pictureBox1.Image != null)
+        {
+            pictureBox1.Image.Dispose();
+        }
+        pictureBox1.Image = bmp;
+    }
+
+    private void listBox1_MouseClick(object sender, MouseEventArgs e)
+        {
+            
+
+        }
+
+        private void listBox1_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (listBox1.SelectedIndex < 0) return;
+            if (e.Button == MouseButtons.Right)
+            {
+                // Fareyle tıklanan öğenin indeksini bul
+                int idx = listBox1.IndexFromPoint(e.Location);
+                if (idx == ListBox.NoMatches)
+                    return; // boş alana tıklanmış
+
+                // (İsterseniz) tıklanan öğeyi seçtirin
+                listBox1.SelectedIndex = idx;
+
+                // Öğeyi sil
+                listBox1.Items.RemoveAt(idx);
+                return;
+            }
+            globalarray = readall(listBox1.GetItemText(listBox1.SelectedItem));
+            txtDesc.Text = "";
+            label2.Text = "Loaded.";
+            readCIT();
+        }
+
+        private void button8_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void button9_Click(object sender, EventArgs e)
+        {
+            ParseStringBlocks(6);
+        }
+    }
 }

@@ -64,6 +64,8 @@
             this.button7 = new System.Windows.Forms.Button();
             this.checkBox1 = new System.Windows.Forms.CheckBox();
             this.listBox2 = new System.Windows.Forms.ListBox();
+            this.button8 = new System.Windows.Forms.Button();
+            this.button9 = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.pictureBox1)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.trackBar1)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.trackBar2)).BeginInit();
@@ -77,7 +79,9 @@
             this.listBox1.Name = "listBox1";
             this.listBox1.Size = new System.Drawing.Size(180, 368);
             this.listBox1.TabIndex = 0;
+            this.listBox1.MouseClick += new System.Windows.Forms.MouseEventHandler(this.listBox1_MouseClick);
             this.listBox1.SelectedIndexChanged += new System.EventHandler(this.listBox1_SelectedIndexChanged);
+            this.listBox1.MouseDown += new System.Windows.Forms.MouseEventHandler(this.listBox1_MouseDown);
             // 
             // button1
             // 
@@ -436,18 +440,42 @@
             // 
             // listBox2
             // 
+            this.listBox2.Font = new System.Drawing.Font("Courier New", 8.25F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.listBox2.FormattingEnabled = true;
+            this.listBox2.ItemHeight = 14;
             this.listBox2.Location = new System.Drawing.Point(196, 38);
             this.listBox2.Name = "listBox2";
             this.listBox2.Size = new System.Drawing.Size(314, 368);
             this.listBox2.TabIndex = 27;
             this.listBox2.SelectedIndexChanged += new System.EventHandler(this.listBox2_SelectedIndexChanged);
             // 
+            // button8
+            // 
+            this.button8.Location = new System.Drawing.Point(18, 544);
+            this.button8.Name = "button8";
+            this.button8.Size = new System.Drawing.Size(394, 23);
+            this.button8.TabIndex = 28;
+            this.button8.Text = "Dump All CIT Files to CarmenDump.txt";
+            this.button8.UseVisualStyleBackColor = true;
+            this.button8.Click += new System.EventHandler(this.button8_Click);
+            // 
+            // button9
+            // 
+            this.button9.Location = new System.Drawing.Point(418, 544);
+            this.button9.Name = "button9";
+            this.button9.Size = new System.Drawing.Size(92, 23);
+            this.button9.TabIndex = 29;
+            this.button9.Text = "ParseStrings";
+            this.button9.UseVisualStyleBackColor = true;
+            this.button9.Click += new System.EventHandler(this.button9_Click);
+            // 
             // Form1
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1252, 601);
+            this.Controls.Add(this.button9);
+            this.Controls.Add(this.button8);
             this.Controls.Add(this.listBox2);
             this.Controls.Add(this.checkBox1);
             this.Controls.Add(this.button7);
@@ -525,6 +553,8 @@
         private System.Windows.Forms.Button button7;
         private System.Windows.Forms.CheckBox checkBox1;
         private System.Windows.Forms.ListBox listBox2;
+        private System.Windows.Forms.Button button8;
+        private System.Windows.Forms.Button button9;
     }
 }
 
